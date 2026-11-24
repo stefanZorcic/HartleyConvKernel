@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
+
+<title>Efficient Small Channel Depthwise Convolutions — Trainium</title>
+<style>
+
+:root { --bg:#f6f7f9; --paper:#fff; --text:#17212b; --muted:#617080; --accent:#7c3aed; --line:#e4e8ee; --code:#101820; --codeText:#dce8f2; }
+@media(prefers-color-scheme:dark) { :root { --bg:#0c1117; --paper:#121a22; --text:#e9eff5; --muted:#a1b0bf; --accent:#b69cff; --line:#263441; --code:#070b10; --codeText:#e0eaf2; } }
+* {box-sizing:border-box} body {margin:0;background:var(--bg);color:var(--text);font:17px/1.75 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif} 
+.topbar {border-bottom:1px solid var(--line);padding:18px max(24px,calc((100vw - 1120px)/2));font-size:13px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.layout {max-width:1180px;margin:0 auto;padding:56px 24px;display:grid;grid-template-columns:230px minmax(0,760px);gap:64px;align-items:start}
+.toc {position:sticky;top:24px;font-size:14px;line-height:1.5} .toc strong {display:block;margin-bottom:12px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)} .toc a {display:block;color:var(--muted);text-decoration:none;padding:7px 0;border-left:2px solid transparent;padding-left:12px} .toc a:hover {color:var(--accent);border-color:var(--accent)}
+article {background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:clamp(24px,5vw,64px);box-shadow:0 16px 50px rgba(20,35,50,.05)}
+.hero {margin-bottom:48px} .eyebrow {font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:700} h1 {font-size:clamp(34px,5vw,54px);line-height:1.12;letter-spacing:-.04em;margin:14px 0 22px} .dek {font-size:20px;line-height:1.55;color:var(--muted);max-width:60ch} .meta {margin-top:26px;font-size:13px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap} .pill {border:1px solid var(--line);border-radius:99px;padding:4px 10px}
+h2 {font-size:30px;line-height:1.25;letter-spacing:-.025em;margin:64px 0 22px;padding-top:24px;border-top:1px solid var(--line)} h3 {font-size:22px;line-height:1.35;margin:36px 0 16px} p {margin:0 0 18px} li {margin:8px 0} ul {padding-left:24px;margin:12px 0 24px} strong {font-weight:700} a {color:var(--accent)}
+.figure-placeholder {margin:28px 0;padding:24px;border:1px dashed #9ba8b5;border-radius:14px;background:color-mix(in srgb,var(--bg) 65%,var(--paper));color:var(--muted);font-size:14px} .figure-label {display:inline-block;font-size:10px;letter-spacing:.12em;font-weight:800;color:var(--accent);margin-bottom:8px} .figure-placeholder p {margin:0}
+pre {overflow:auto;background:var(--code);color:var(--codeText);border-radius:12px;padding:20px;margin:22px 0;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace} pre.equation {background:color-mix(in srgb,var(--bg) 60%,var(--paper));color:var(--text);border:1px solid var(--line);text-align:center} .table-wrap {overflow-x:auto;margin:24px 0} table {width:100%;border-collapse:collapse;font-size:15px} th,td {padding:12px 14px;text-align:right;border-bottom:1px solid var(--line)} th:first-child,td:first-child {text-align:left} thead th {color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.07em} tbody th {font-weight:600} tbody td {font-variant-numeric:tabular-nums}
+.footer {color:var(--muted);font-size:13px;margin-top:48px;padding-top:24px;border-top:1px solid var(--line)}
+@media(max-width:900px) {.layout {grid-template-columns:1fr;gap:24px;padding:24px 14px}.toc {position:relative;top:auto;display:none}article {padding:24px;border-radius:14px}h2 {margin-top:44px}}
+
+.article-figure {
+    margin: 36px 0;
+}
+
+.article-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    margin: 0 auto;
+}
+
+.article-figure figcaption {
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 12px;
+}
+
+.code-container {
+    position: relative;
+    margin: 28px 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #1e1e2e;
+    border: 1px solid #383849;
+}
+
+.code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 11px 16px;
+    background: #28283a;
+    color: #b8b8ca;
+    font-size: 12px;
+    font-family: sans-serif;
+}
+
+.code-header button {
+    background: #3a3a50;
+    border: none;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.code-header button:hover {
+    background: #50506a;
+}
+
+.code-container pre {
+    margin: 0 !important;
+    padding: 20px !important;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+.code-container code {
+    font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+</style>
+</head>
+<body>
+<div class="topbar">Engineering notes · AI systems & kernels</div>
+<div class="layout">
+<nav class="toc" aria-label="Table of contents"><strong>On this page</strong>
+<a href="#s1">Depthwise convolution</a><a href="#s2">Trainium 1</a><a href="#s3">Why every percent matters</a><a href="#s4">Conventional approaches</a><a href="#s5">Signal-processing detour</a><a href="#s6">The kernel</a><a href="#results">Results & caveats</a></nav>
+
+<article>
+<header class="hero"><div class="eyebrow">Kernel optimization · Trainium 1</div><h1>Efficient Small Channel Depthwise Convolutions</h1><p class="dek">A Hartley-transform approach to 1D depthwise convolution—Lets build a 1D Depthwise Convolution Kernel 100x Faster Than Amazon's Public One!</p><div class="meta"><span class="pill">NKI</span><span class="pill">Trainium</span><span class="pill">Performance</span><span>Draft · Technical deep dive</span></div></header>
+
+<h2 id="s1">What is a depthwise convolution, anyway?</h2>
+<p>If you've trained a vision model, you've met convolutions: a small window of weights slides across your input, 
+       and at each position you multiply, add everything up, and write down one number. In one dimension, that looks like this:</p>
+
+<pre class="equation"><code>y[t] = w[0]·x[t] + w[1]·x[t+1] + ... + w[K-1]·x[t+K-1]</code></pre>
+
+<p> <em>x</em> is your sequence, <em>w</em> is the filter (K weights), and <em>y</em> is the output. That's the whole idea. 
+       The filter is a little pattern detector, and the output tells you how strongly each position matches it.</p>
+
+<p>In a depthwise convolution we have c parallel sequences that need to be convolved each with their own separate filter. 
+       Of course, with a batch dimension, meaning we have multiple copies of each channel (aka. c). To keep this simple,
+        we will be looking at the one-dimensional case of convolution where w[i] is a scalar throughout this post. </p>
+
+<figure class="article-figure">
+ <img src="assets/ConvFilterExample.png"
+       alt="Sliding window convolution across a multiple sequences and multiple batches">
+</figure>
+
+<p>That simple math makes depthwise convolutions cheap on paper, and that's exactly why they're everywhere in modern architectures. 
+       They show up as the short convolution in state-space models like Mamba, large SoTA LLMs like Qwen3.5, in ConvNeXt-style vision 
+       blocks, and in long-convolution sequence models. They give a model a cheap way to look at local context, and they usually sit 
+       inside every layer, repeated dozens of times.</p>
+
+<p><strong>But cheap on paper doesn’t necessarily mean cheap on hardware.</strong></p>
+
+<p>Depthwise convolutions do very little arithmetic per byte they move, and they don't look like the big dense matrix multiplies that 
+       modern accelerators are built around. Keep that thought, because it's the whole story of this post.</p>
+
+<h2 id="s2">A quick tour of Trainium 1</h2>
+<p>AI models are larger and run on hardware accelerator, so we will need to pick one to test our idea. I like Trainium (if it’s good 
+       enough for OpenAI and Anthropic, it is good enough for me). We&#x27;re going to focus on the first generation, Trainium 1. 
+       It&#x27;s a great place to start: the core ideas (engines, memory, partitions) are all here in their simplest form. If you 
+       understand how this chip works, the additions in later generations are natural extensions, and you&#x27;ll be able to follow 
+       them without much trouble.</p>
+
+<p>A Trainium chip is built from NeuronCores, and each core has a few specialized compute engines that run side by side:</p>
+<ul>
+       <li>The tensor engine is the heavyweight. It&#x27;s a big systolic array, built to do 128x128 matrix multiplication very fast. 
+       This is where nearly all of the chip&#x27;s peak throughput lives at 90 TFLOPS.</li>
+       <li>The vector engine does elementwise math and reductions: add this to that, multiply these two, sum across a row. It&#x27;s 
+       flexible, but with much lower throughput than the tensor engine at 2.3 TFLOPs.</li>
+       <li>The scalar engine handles things like activation functions, and there&#x27;s also a general-purpose engine for oddball 
+       operations.</li>
+</ul>
+
+<p>Data moves through a software-managed memory hierarchy. Big tensors live in off-chip HBM. To compute on anything, you first copy it 
+       into SBUF, a fast on-chip scratchpad. Unlike a CPU cache, nobody moves data in and out for you: your 
+       kernel decides what gets loaded and when. Matrix multiplication results land in a smaller buffer called PSUM, and from there they&#x27;re 
+       copied back to SBUF.</p>
+
+<figure class="article-figure">
+ <img src="assets/NeuronCore.png"
+       alt="Diagram of a Trainium 1 Neuron core">
+</figure>
+
+<p>The detail that shapes everything is that SBUF is organized into 128 partitions, like 128 parallel lanes where the length of the lanes is the free dimension. The tensor engine multiplies by contracting along the partition axis, and the vector engine works on all 128 partitions at once. So how you lay your data out across those partitions largely decides how well the hardware is used. A shape that fills the partitions flies, and a shape that doesn&#x27;t leaves most of the chip idle.</p>
+
+<figure class="article-figure">
+ <img src="assets/sbuf.png"
+       alt="Diagram of a Trainium 1 sbuf">
+</figure>
+
+<h2 id="s3">Why every percent matters</h2>
+
+<p>Let&#x27;s zoom out for a second. The models we run on chips like these are enormous, and the chips themselves are expensive and hungry for power. 
+       A training run or a busy inference service keeps thousands of them running around the clock, and the electricity is a serious part of the cost.</p>
+
+<p>At that scale, small inefficiencies stop being small. A kernel that wastes ten percent of the chip&#x27;s time isn&#x27;t a minor annoyance, it&#x27;s 
+       ten percent of a very large bill, repeated in every layer of every step. Which brings us to the joke we&#x27;re borrowing from Alexsa Gordić: at 
+       this scale, performance isn&#x27;t measured in O(N), it&#x27;s measured in O(NR), where NR stands for nuclear reactors. 
+       [<a href="https://www.aleksagordic.com/blog/matmul" target="_blank" rel="noopener">https://www.aleksagordic.com/blog/matmul</a>]</p>
+
+<p>So, performance engineers care about squeezing the hardware (and hopefully building the fewest nuclear reactors needed). The big matrix multiplications 
+       in a model maps nicely onto the tensor engine, and they get most of the attention. But the operations that don&#x27;t look like big matrix multiplies 
+       can quietly eat more time than their share of the math would suggest, because they end up on slower engines or sit waiting on data. Depthwise 
+       convolution is a classic example: it&#x27;s cheap in arithmetic, but it&#x27;s a poor fit for the engine that holds nearly all the chip&#x27;s speed.</p>
+
+<p>That&#x27;s what makes it an interesting target for a custom kernel, and to develop it on Trainium that means NKI, the Neuron Kernel Interface, which 
+       lets you program these engines directly in Python. So here&#x27;s the question the rest of this post tries to answer: depthwise convolution is a 
+       bad fit for the tensor engine, and the tensor engine is where the speed is. Is there a way to rewrite the problem so that it fits?</p>
+
+<h2 id="s4">How people usually do it</h2>
+
+<p>Before coming up with anything, let&#x27;s look at the standard ways to run a depthwise convolution on this hardware, and how fast each 
+       could go at best.</p>
+
+<p>A bit of vocabulary first. The K weights of a filter are usually called its taps, a term borrowed from signal processing, where a filter 
+       was literally a delay line with a tap at each position. A &quot;kernel with K taps&quot; just means a filter with K weights.</p>
+
+<h3>Approach 1: turn it into a matrix multiply</h3>
+
+<p>The tensor engine is where the speed is, so the natural first move is to make the convolution look like a matrix multiplication. It can. 
+       For a single channel, the output is a matrix times the input sequence, and the matrix is a Toeplitz matrix: each row holds the filter, 
+       shifted over by one more position than the row above it, with zeros everywhere else.</p>
+
+<figure class="article-figure">
+ <img src="assets/Toeplitz.png"
+       alt="Diagram of a toeplitz approach">
+</figure>
+
+<p>Our input is laid out as [B, C, H]: batch, channels, sequence. Pick one channel. Every batch element in that channel is convolved with the 
+       same filter, so they all share one Toeplitz matrix. Therefore, put the sequence on the contraction axis and stack the batch elements 
+       side by side as columns, and one channel becomes a single matrix-matrix multiply, [H, H] @ [H, B]. Every channel has its own filter, 
+       so this happens once per channel.</p>
+
+<figure class="article-figure">
+ <img src="assets/BatchFolding.png"
+       alt="Diagram of a toeplitz approach with batch folding">
+</figure>
+<p>Because the matrix is banded, each output only depends on the few inputs right around it. That means a long sequence doesn&#x27;t have to be 
+       treated as one long column. We can cut it into chunks of 128 and treat each chunk as if it were one more batch element. The sequence gets 
+       folded into the batch dimension, so the operand has B · (H/128) columns instead of B, and the same matrix streams over all of them. 
+       That&#x27;s useful because the tensor engine handles extra columns cheaply once a matrix is loaded.</p>
+
+<h3>How fast could it go? </h3> 
+
+<p>Let&#x27;s put a roofline model on this. The idea is that a kernel is held back by one of two limits, how fast the 
+engine can compute or how fast we can move the data, and the slower one sets the speed:</p>
+
+<pre class="equation"><code>time ≥ max( compute cost, memory cost )</code></pre>
+
+<p>The compute cost comes from counting 128×128×128 tile matmuls, since that&#x27;s the unit the tensor engine works in:</p>
+<pre class="equation"><code>compute = 2 · ⌈H/128⌉ · ⌈H/128⌉ · ⌈B·(H/128)/128⌉ · C  /  (matmuls per second)</code></pre>
+<p>The first two ceilings count how many 128×128 tiles the Toeplitz matrix is cut into, the third counts how many 128-column chunks of the folded 
+       input stream through it, and the factor of C is there because every channel needs its own matrix. This assumes the copies from PSUM back
+       to SBUF never become a bottleneck, which is generous, so treat it as a best case. Notice how much of that work is wasted: each row of 
+       the matrix has only K useful entries, so almost all of the multiplications are by zero.</p>
+
+<p>The memory cost is the time to get data on and off the chip. Assuming a dataype of fp16 which is 2 bytes and N be the length of the 
+       output, given by N = H + K - 1:</p>
+
+<pre class="equation"><code>memory = 2 · B · C · H / DMA bandwidth     (input in)
+       + 2 · C · K / DMA bandwidth         (the filters in)
+       + 2 · B · C · N / DMA bandwidth     (result out)</code></pre>
+
+<p>The NKI library&#x27;s version. The kernel we compare against later is a cousin of this idea, called implicit GEMM. It avoids building 
+       the big mostly-zero matrix by loading the input in a shifted layout, so the filter taps line up along the matmul&#x27;s contraction axis. 
+       It&#x27;s a smarter way to use the tensor engine, but it&#x27;s still a depthwise convolution at heart, with a very thin matmul. 
+       [Verify this description against depthwise_conv1d.py before publishing.]</p>
+
+<h3>Approach 2: let the vector engine do it</h3>
+<p>The other direct approach follows the formula literally and skips the tensor engine entirely. Put the (batch, channel) pairs across the
+       128 partitions and run the sequence along the free dimension. Each partition owns one sequence and its K taps. Loop over the taps: 
+       take the input shifted by k positions, multiply by that tap&#x27;s weight, and add it into a running total.</p>
+
+<p>y  = w[0] * x[0 : H]</p>
+<p>y += w[1] * x[1 : H+1]</p>
+<p>y += w[2] * x[2 : H+2]</p>
+<p>...</p>
+
+<!-- <div class="figure-placeholder"><span class="figure-label">FIGURE</span><p>Figure idea: one partition&#x27;s sequence with K shifted copies 
+       stacked under it, each scaled and summed into the output.</p></div> -->
+
+<p>There&#x27;s no wasted arithmetic here. Each (batch, channel) pair has H outputs and each needs K multiply-adds, and the vector engine 
+       handles 128 elements at a time, so the roofline looks like this:</p>
+
+<pre class="equation"><code>compute = B · C · K · H / 128  /  (vector-engine operations per second)</code></pre>
+
+<pre class="equation"><code>memory = 2 · B · C · H / DMA bandwidth     (input in)
+       + 2 · C · K / DMA bandwidth         (the filters in)
+       + 2 · B · C · N / DMA bandwidth     (result out)</code></pre>
+
+<p>The memory cost is identical to the Toeplitz approach, since the same data has to come in and go out. The difference is the compute side. 
+       The vector engine is a lot slower than the tensor engine, and the cost grows in direct proportion to K, so a longer filter means 
+       proportionally more work. All the while, the tensor engine, where nearly all of the chip&#x27;s peak throughput lives, sits idle.</p>
+
+<h3>The common thread</h3>
+<p>Each approach either avoids the fast engine or uses only a sliver of it. The Toeplitz approach runs on the tensor engine but spends most 
+       of its arithmetic on zeros, and needs a different matrix for every channel. The vector approach does exactly the arithmetic required 
+       but on the slowest engine. A depthwise convolution is just a thin problem: a short filter sliding along a sequence, with very little 
+       work for each output.</p>
+
+<p>That leaves an unusual idea. What if we accepted extra arithmetic, but made it run on dense, full-size matrix multiplies that the tensor 
+       engine handles at full speed, with matrices shared across every channel? That&#x27;s where a little math from signal processing comes in.</p>
+
+<h2 id="s5">A detour through signal processing</h2>
+
+<p>Everything so far has been about doing a convolution directly: slide the filter along the sequence, multiply, add. Signal processing has 
+       known for a long time that there&#x27;s another way to get the same answer, and it&#x27;s the key to this whole post.</p>
+
+<h3>Convolution becomes multiplication</h3>
+<p>Here&#x27;s the idea in one sentence: convolving two sequences is the same as transforming both into the &quot;frequency domain&quot;, 
+       multiplying them pointwise, and transforming back.</p>
+
+<p>The standard version of this uses the Fourier transform. Take the input x and the filter w, transform both, multiply the two results element 
+       by element, and run the inverse transform on the product. In place of a sliding window, you get one transform on each side and a single 
+       multiply per element in between. (One technical detail: the theorem is really about circular convolution, so we zero-pad both sequences 
+       to length N = H + K − 1, the length of the full output, so nothing wraps around.)</p>
+
+<figure class="article-figure">
+ <img src="assets/ConvolveTheorem.png"
+       alt="Diagram of a convolution theorem">
+</figure>
+
+<h3>The trouble with Fourier</h3>
+<p>So lets run a Fourier transform to get it in the frequency domain then… right?</p>
+<p>The first problem is that the Fourier transform is complex-valued. Its basis functions are complex exponentials, so every number in the 
+       frequency domain has a real part and an imaginary part, and the pointwise multiply is a complex multiply (four real multiplies and two adds). 
+       You can handle that by splitting everything into real and imaginary parts, but it roughly doubles the data and complicates the pipeline.</p>
+
+<p>The second is how the transform is usually computed. The fast Fourier transform (FFT) is a clever algorithm made of small butterfly stages 
+       with a lot of shuffling in between. That&#x27;s great on a CPU, but it&#x27;s a poor match for an engine built around big dense 
+       matrix multiplies and a rigid partition layout.</p>
+
+<p>A transform of length N is also just a matrix multiply: an N×N matrix of fixed numbers times your sequence. It&#x27;s more arithmetic than 
+       the FFT, N² instead of N·log N, but it&#x27;s exactly the kind of arithmetic the tensor engine is built for. We just need a 
+       transform that doesn&#x27;t drag complex numbers along.</p>
+
+<h3>Enter the Hartley transform</h3>
+<p>The Hartley transform is a close cousin of the Fourier transform that stays entirely in the real numbers. Instead of complex exponentials, 
+       it uses a real wave, cosine plus sine:</p>
+
+<pre class="equation"><code>H[k] = Σₙ x[n] · cas(2π·n·k / N)        where cas(θ) = cos(θ) + sin(θ)</code></pre>
+
+<p>It&#x27;s real in, real out, so there are no imaginary parts and no complex arithmetic, and everything stays in fp16. And it&#x27;s its own 
+       inverse, up to a scale: apply the transform twice and you get your original sequence back multiplied by N, so the inverse uses the same 
+       machinery with a 1/N factor.</p>
+
+<p>Since the discrete Hartley transform (DHT) is a matrix multiply, let&#x27;s look at the matrix. Entry (n, k) is just cas(2π·n·k / N). 
+       Here&#x27;s the smallest interesting case, N = 4, where every entry works out to ±1:</p>
+
+<figure class="article-figure">
+ <img src="assets/HartleyTransform.png"
+       alt="Diagram of a hartley transform">
+</figure>
+
+<p>For larger N the entries are no longer all ±1, but they always stay between −√2 and √2. Three properties of this matrix matter for us:</p>
+
+<ul><li>It&#x27;s symmetric. Entry (n, k) equals entry (k, n), since both depend on the product n·k. So the matrix equals its own transpose, 
+       and we only ever need to store one copy.</li><li>It&#x27;s dense, with no zeros. Compare that to the Toeplitz matrix, which was 
+       mostly zeros. Every multiply in a DHT matmul is doing real work.</li><li>It&#x27;s the same for everything. The matrix depends only on 
+       N. It doesn&#x27;t know about channels, batch elements or filters. Whatever sequence you give it, you multiply by the same N×N matrix.</li>
+</ul>
+
+<p>Remember how the tensor engine works. It holds one operand in place (the &quot;stationary&quot; side), streams the other through 
+       (the &quot;moving&quot; side), and contracts along the 128-partition axis. That&#x27;s the shape of the DHT:</p>
+
+<ul>
+       <li>The matrix is stationary. We load the N×N DHT matrix once, with N on the partitions, and it never has to be reloaded. Contrast 
+       this with the Toeplitz approach, where every channel needed its own matrix.</li>
+       <li>The data is the moving side. Every (batch, channel) sequence is a column, and we stream hundreds of columns through per matmul. 
+       As the number of columns grows, the cost of loading the matrix is spread thin.</li>
+       <li>Symmetry removes a transpose. The tensor engine multiplies the transpose of the stationary operand by the moving one. For a 
+       symmetric matrix, the transpose is the matrix itself, so we get exactly the product we want without any extra data movement.</li>
+       <li>There&#x27;s nothing to waste. No zeros, no padding of the contraction axis beyond the sequence itself, and when N fills the 
+       128 partitions, the whole systolic array is busy. (For larger N, you&#x27;d tile the matrix and accumulate partial products in PSUM, 
+       which the engine handles natively.)</li><li>The inverse comes for free. The inverse transform uses the same matrix, so it&#x27;s one 
+       more matmul against data that&#x27;s already sitting in SBUF.</li>
+</ul>
+
+<!-- <div class="figure-placeholder"><span class="figure-label">FIGURE</span><p>Figure idea: the DHT matrix sitting in the tensor engine, with 
+columns of data streaming through it and transformed columns coming out the other side.</p></div> -->
+
+<p>The price is extra arithmetic. A dense N×N matmul does far more math than a K-tap filter strictly needs. But the matmul is exactly what 
+the tensor engine is built to do at full speed, so the bet is that doing more work, much faster, wins.</p>
+
+<p>There&#x27;s one twist. In the Fourier world, the convolution theorem is a clean pointwise product. In the Hartley world it&#x27;s a 
+little messier, because a single Hartley coefficient mixes information from a frequency and its mirror image. Writing X[−k] for the coefficient 
+at the mirrored index (which wraps around to N − k), the transform Z of the convolution reads:</p>
+
+<pre class="equation"><code>Z[k] = ½ · ( X[k]·Y[k] + X[−k]·Y[k] + X[k]·Y[−k] − X[−k]·Y[−k] )</code></pre>
+<p>where X is the transform of the input and Y is the transform of the filter. It looks like a mouthful, but all it needs is the transformed 
+input and a mirrored copy of it, combined with pointwise multiplies and adds. There&#x27;s still no sliding window.</p>
+
+<p>A little algebra makes it friendlier. Split the filter&#x27;s transform into its even and odd parts, Y_even = (Y[k] + Y[−k]) / 2 and 
+Y_odd = (Y[k] − Y[−k]) / 2. Then the whole thing collapses to:</p>
+
+<pre class="equation"><code>Z[k] = X[k] · Y_even[k]  +  X[−k] · Y_odd[k]</code></pre>
+<p>Two pointwise multiplies and an add. And since the filter is fixed, Y_even and Y_odd can be worked out ahead of time.</p>
+<p>Put the pieces together and a depthwise convolution becomes three steps:</p>
+<p>1.	Forward transform. Multiply the padded input by the DHT matrix, and by a mirrored version of it to get X[−k]. These are dense 
+       matrix multiplies on the tensor engine.</p>
+<p>2.	Pointwise combine. Multiply by each channel&#x27;s filter spectra and add. This is elementwise work on the vector engine.</p>
+<p>3.	Inverse transform. One more dense matrix multiply with the same DHT matrix, back on the tensor engine.</p>
+
+<!-- <div class="figure-placeholder"><span class="figure-label">FIGURE</span><p>Figure idea: the three steps drawn as a pipeline, colored by which engine does the work: tensor, vector, tensor.</p></div> -->
+
+<p>The per-channel part, the filter, only shows up in the cheap pointwise step. That&#x27;s the shape of problem the tensor engine wants: 
+       one fixed matrix, a very wide stream of data, and no wasted zeros in the multiply. In the next section, we&#x27;ll see how this maps 
+       onto an NKI kernel.</p>
+
+<h2 id="s6">The kernel</h2>
+<p>Time to turn the math into an NKI kernel. The plan is three steps that match the three steps from the last section: transform the input, 
+       combine it with the filter, transform back. First, though, the data layout, because on this chip that choice shapes everything else.</p>
+
+<h3>Layout: one column per (batch, channel)</h3>
+
+<p>Every (batch, channel) pair is an independent sequence, so we flatten [B, C, H] into a pile of B·C columns, each one a sequence of length H. 
+       The sequence runs down the partition axis and the columns run along the free axis. That puts the sequence on the contraction axis of the 
+       matmul, which is where the DHT needs it.</p>
+
+<p>Each column is zero-padded from H up to N rows, so we keep a tile that is N partitions tall and 512 columns wide, zero in the bottom rows, and 
+       load each slice of the input into its top H rows. (Here N is at most 128, so one tile covers the whole sequence. We keep it that way for 
+       clarity, and tiling the sequence for longer inputs is a natural extension.)</p>
+
+<!-- <div class="figure-placeholder"><span class="figure-label">FIGURE</span><p>Figure idea: the [B, C, H] tensor flattened into a wide [H, B·C] sheet, 
+       then cut into 512-column tiles, with the zero padding shaded at the bottom of each tile.</p></div> -->
+
+<p>Three things get loaded once at the start and never move again: the DHT matrix, a second matrix that produces the mirrored spectrum (more on that 
+       in a moment), and the per-channel filter spectra from the previous section, which we&#x27;ve already combined into the two even and odd pieces. 
+       Everything else streams through.</p>
+
+<h3>Step 1: the forward transform</h3>
+<p>This is the dense, tensor-engine part. The DHT matrix is the stationary operand, the padded input tile is the moving operand, and one matmul produces 
+       the transformed spectrum for 512 columns at once:</p>
+
+<pre><code>nisa.nc_matmul(dst=ps_h,  stationary=htm_sbuf,   moving=pad_tile)   # X[k]
+nisa.nc_matmul(dst=ps_hr, stationary=htm_r_sbuf, moving=pad_tile)   # X[-k]</code></pre>
+
+<p>The second line is how we get the mirrored spectrum. Mirroring is just reordering the output rows, but reordering across partitions is awkward on 
+       this hardware. It&#x27;s much easier to build the reordering into a second matrix, the same DHT matrix with its columns rearranged, and let 
+       the tensor engine produce the mirrored spectrum directly. That costs an extra matmul, but a matmul is exactly the cheap thing here. Both results 
+       land in PSUM and get copied to SBUF.</p>
+
+<h3>Step 2: the pointwise combine</h3>
+<p>Now the vector engine. With the spectrum X and its mirror in hand, the convolution is the two-multiply formula from the last section:</p>
+<pre><code>nisa.tensor_tensor(t0,   s_h,  w_a, op=nl.multiply)   # X[k]  · Y_even
+nisa.tensor_tensor(t1,   s_hr, w_d, op=nl.multiply)   # X[-k] · Y_odd
+nisa.tensor_tensor(conv, t0,   t1,  op=nl.add)</code></pre>
+<p>Two multiplies and an add, and the 1/N scale of the inverse transform is already folded into the weights, so there&#x27;s nothing else to do.</p>
+<p>One wrinkle. The weights are per channel, but our columns mix batch and channel, so each column needs the weights for its own channel. Column i 
+       belongs to channel i mod C, so a tile of 512 consecutive columns needs a window of 512 consecutive channels, wrapping around. We handle 
+       that by storing the weights repeated end to end, so any tile just reads a slice at the right offset. That works for any channel count, 
+       not only multiples of 128.</p>
+
+<!-- <div class="figure-placeholder"><span class="figure-label">FIGURE</span><p>Figure idea: the weight array repeated end to end, with a tile-sized window 
+       sliding over it.</p></div> -->
+
+<h3>Step 3: the inverse transform</h3>
+<p>The inverse is one more matmul against the same DHT matrix, but the roles are swapped. The convolved spectrum is now the stationary operand, 
+       and the DHT matrix is the moving one:</p>
+
+<pre><code>nisa.nc_matmul(dst=out_psum, stationary=conv[:, j:j+128], moving=htm_sbuf)</code></pre>
+<p>This swap is deliberate. The result comes out with the columns on the partitions and the sequence along the free axis, which is exactly the 
+       memory order of the [B, C, N] output. Each row of the result is one finished (batch, channel) sequence, so we copy it out of PSUM and 
+       write it straight to HBM, with no transpose.</p>
+
+<!-- <div class="figure-placeholder"><span class="figure-label">FIGURE</span><p>Figure idea: the layout at each stage, sequence on partitions after 
+       the pad, then spectrum on partitions, then columns on partitions at the output, with arrows showing where each matmul flips it.</p></div> -->
+
+<h3>How fast could it go?</h3>
+<p>Same recipe as before: the kernel is limited by the slower of compute and memory.</p>
+<pre class="equation"><code>time ≥ max( tensor-engine compute, vector-engine compute, memory )</code></pre>
+<p>The tensor engine does three dense matmuls per column of data, two forward and one inverse, each of them against an N×N matrix:</p>
+<pre class="equation"><code>tensor = 3 · ⌈N/128⌉ · ⌈N/128⌉ · ⌈B·C/128⌉  /  (matmuls per second)</code></pre>
+<p>The vector engine does the three pointwise operations over N rows by B·C columns:</p>
+<pre class="equation"><code>vector = 3 · ⌈N/128⌉ · B·C  /  (vector-engine operations per second)</code></pre>
+<p>And the memory cost is the data going in and out, plus a small one-time load of the matrices and the weights:</p>
+<pre class="equation"><code>memory = datatype · B · C · H / DMA bandwidth                  (input in)
+       + datatype · B · C · N / DMA bandwidth                  (result out)
+       + datatype · (2·N² + 2·N·C) / DMA bandwidth             (matrices and weights, loaded once)</code></pre>
+<p>Compare this with the Toeplitz approach. The compute no longer has a factor of C, because the matrices are shared by every channel, and no 
+       K appears anywhere, because the filter only enters through the weights. It does have more tensor-engine work than a single Toeplitz pass, 
+       three matmuls where there was one, and it adds a vector-engine term that the Toeplitz approach didn&#x27;t have. The bet is that those 
+       extra costs are small next to what we&#x27;ve saved.</p>
+
+<p>One caveat on the max. That formula assumes the engines overlap perfectly, so the slowest one hides all the others. Our kernel doesn&#x27;t 
+       try very hard to do that, and keeping the phases separate means the tensor and vector engines mostly take turns. The real time will sit 
+       somewhere between the max and the sum of the terms. We&#x27;ll come back to that gap near the end.</p>
+
+<details class="full-source">
+    <summary>View complete Hartley convolution kernel</summary>
+
+    <div class="code-container">
+        <div class="code-header">
+            <span>Python · NKI</span>
+            <button onclick="copyCode(this)">Copy</button>
+        </div>
+
+        <pre><code class="language-python">
+import nki
+import nki.language as nl
+import nki.isa as nisa
+import torch
+from utils import benchmark
+
+B, C, H, K = 128, 256, 120, 3
+TILE = 512                  # moving free-dim per matmul (one fp32 PSUM bank)
+BLOCK = 8 * TILE            # columns of spectrum kept in SBUF at once
+ 
+
+def prepare_hartley_weights(w_h, w_hr, N, tile=TILE):
+    """
+    Offline (host-side) weight preparation. Run once, reuse for every call.
+ 
+    w_h, w_hr: [C, N]  Hartley transforms of the kernel and the reversed kernel.
+ 
+    The conv in the Hartley domain is
+        0.5/N * (s_h*k_h + s_hr*k_h + s_h*k_hr - s_hr*k_hr)
+      = s_h * [0.5/N * (k_h + k_hr)] + s_hr * [0.5/N * (k_h - k_hr)]
+      = s_h * w_a + s_hr * w_d
+ 
+    so we precompute w_a and w_d (scale folded in), transpose them to [N, C]
+    so N lines up with the partition axis of the spectrum, and extend them
+    periodically along C to [N, C + tile]. Column bc of the activation uses
+    channel bc % C, so a tile starting at bc0 just reads the slice
+    [bc0 % C : bc0 % C + tile], for any C.
+ 
+    returns w_a, w_d: float32 [N, C + tile]
+    """
+    w_h = np.asarray(w_h, dtype=np.float32)
+    w_hr = np.asarray(w_hr, dtype=np.float32)
+    C = w_h.shape[0]
+    scale = 0.5 / N
+    w_a = scale * (w_h + w_hr)           # [C, N]
+    w_d = scale * (w_h - w_hr)           # [C, N]
+    idx = np.arange(C + tile) % C
+    w_a = np.ascontiguousarray(w_a.T[:, idx])   # [N, C + tile]
+    w_d = np.ascontiguousarray(w_d.T[:, idx])
+    return w_a, w_d
+ 
+ 
+@nki.jit
+def hartley_kernel(x, htm, htm_reversed, w_a, w_d):
+    """
+    1D depthwise convolution via the Discrete Hartley Transform (DHT).
+    x:            [H, B, C]
+    htm:          [N, N]            Hartley matrix (symmetric), N = H + K - 1
+    htm_reversed: [N, N]
+    w_a, w_d:     [N, C + TILE]     from prepare_hartley_weights (scale included)
+    returns:      [B, C, N]
+ 
+    Three separate phases per block of columns, so the tensor engine runs
+    back-to-back dense matmuls:
+        1. DHT          (matmuls)
+        2. Convolution  (elementwise: s_h*w_a + s_hr*w_d)
+        3. IDHT         (matmuls)
+    Requires B*C % 128 == 0 and H <= N <= 128; C can be anything.
+    """
+    H, B, C = x.shape
+    N = htm.shape[0]                      # N = H + K - 1
+    BC = B * C
+    P = 128
+    assert BC % P == 0, "BxC is not a multiple of 128"
+    assert H <= N <= P, "need H <= N <= 128"
+    assert w_a.shape[0] == N and w_a.shape[1] == C + TILE, "use prepare_hartley_weights"
+ 
+    data_type = nl.float16
+    BLK_MAX = min(BLOCK, BC)
+ 
+    output = nl.ndarray(shape=(B, C, N), dtype=data_type, buffer=nl.shared_hbm)
+    out2d = output.reshape((BC, N))
+    x2d = x.reshape((H, BC))
+ 
+    # ---- constants: plain loads, nothing to compute ----
+    htm_sbuf = nl.ndarray(shape=(N, N), dtype=data_type, buffer=nl.sbuf)
+    nisa.dma_copy(src=htm, dst=htm_sbuf)
+    htm_r_sbuf = nl.ndarray(shape=(N, N), dtype=data_type, buffer=nl.sbuf)
+    nisa.dma_copy(src=htm_reversed, dst=htm_r_sbuf)
+ 
+    w_a_sbuf = nl.ndarray(shape=w_a.shape, dtype=nl.float32, buffer=nl.sbuf)
+    nisa.dma_copy(src=w_a, dst=w_a_sbuf)
+    w_d_sbuf = nl.ndarray(shape=w_d.shape, dtype=nl.float32, buffer=nl.sbuf)
+    nisa.dma_copy(src=w_d, dst=w_d_sbuf)
+ 
+    # ---- buffers ----
+    # padded activation tile: rows H..N-1 stay zero (the padding)
+    pad_tile = nl.zeros(shape=(N, TILE), dtype=data_type, buffer=nl.sbuf)
+ 
+    ps_h = nl.ndarray(shape=(N, TILE), dtype=nl.float32, buffer=nl.psum)
+    ps_hr = nl.ndarray(shape=(N, TILE), dtype=nl.float32, buffer=nl.psum)
+ 
+    s_h_all = nl.ndarray(shape=(N, BLK_MAX), dtype=data_type, buffer=nl.sbuf)
+    s_hr_all = nl.ndarray(shape=(N, BLK_MAX), dtype=data_type, buffer=nl.sbuf)
+    conv_all = nl.ndarray(shape=(N, BLK_MAX), dtype=data_type, buffer=nl.sbuf)
+ 
+    t0 = nl.ndarray(shape=(N, TILE), dtype=nl.float32, buffer=nl.sbuf)
+    t1 = nl.ndarray(shape=(N, TILE), dtype=nl.float32, buffer=nl.sbuf)
+ 
+    out_psum = nl.ndarray(shape=(P, N), dtype=nl.float32, buffer=nl.psum)
+    out_sbuf = nl.ndarray(shape=(P, N), dtype=data_type, buffer=nl.sbuf)
+ 
+    for blk0 in range(0, BC, BLOCK):
+        blk = min(BLOCK, BC - blk0)
+ 
+        # ===== Phase 1: DHT (matmuls only) =====
+        # spectrum[N, cols] = htm^T @ padded_x[N, cols]
+        for j in range(0, blk, TILE):
+            cs = min(TILE, blk - j)
+            bc0 = blk0 + j
+            nisa.dma_copy(src=x2d[:, bc0:bc0 + cs], dst=pad_tile[0:H, 0:cs])
+ 
+            nisa.nc_matmul(dst=ps_h[:, 0:cs], stationary=htm_sbuf, moving=pad_tile[:, 0:cs])
+            nisa.nc_matmul(dst=ps_hr[:, 0:cs], stationary=htm_r_sbuf, moving=pad_tile[:, 0:cs])
+ 
+            nisa.tensor_copy(dst=s_h_all[:, j:j + cs], src=ps_h[:, 0:cs])
+            nisa.tensor_copy(dst=s_hr_all[:, j:j + cs], src=ps_hr[:, 0:cs])
+ 
+        # ===== Phase 2: convolution (elementwise only) =====
+        # conv = s_h * w_a + s_hr * w_d   (weights precombined, scale folded in)
+        for j in range(0, blk, TILE):
+            cs = min(TILE, blk - j)
+            off = (blk0 + j) % C          # channel of the first column in this tile
+ 
+            nisa.tensor_tensor(dst=t0[:, 0:cs], data1=s_h_all[:, j:j + cs],
+                               data2=w_a_sbuf[:, off:off + cs], op=nl.multiply)
+            nisa.tensor_tensor(dst=t1[:, 0:cs], data1=s_hr_all[:, j:j + cs],
+                               data2=w_d_sbuf[:, off:off + cs], op=nl.multiply)
+            nisa.tensor_tensor(dst=conv_all[:, j:j + cs], data1=t0[:, 0:cs],
+                               data2=t1[:, 0:cs], op=nl.add)
+ 
+        # ===== Phase 3: IDHT (matmuls only) =====
+        # out[128, N] = conv[N, 128]^T @ htm[N, N]; rows are (b, c) flattened
+        for j in range(0, blk, P):
+            nisa.nc_matmul(dst=out_psum, stationary=conv_all[:, j:j + P], moving=htm_sbuf)
+            nisa.tensor_copy(dst=out_sbuf, src=out_psum)
+            nisa.dma_copy(src=out_sbuf, dst=out2d[blk0 + j:blk0 + j + P, :])
+ 
+    return output
+        </code></pre>
+    </div>
+</details>
+
+<h3>How we tested it</h3>
+<p>Before we get to the numbers, a quick word on what we measured, since a few of these choices change how you should read the results.</p>
+<p>On one side is depthwise_conv1d_implicit_gemm, the depthwise convolution kernel that ships in the NKI library. On the other is our Hartley kernel. 
+       Both do the same job: a depthwise 1D convolution with stride 1 and zero padding.</p>
+
+<p>For shapes, we went with a long-ish sequence and a tiny kernel: H = 120 and K = 3. That gives a transform length of 122, which fits inside a 
+       single 128-partition tile. To be clear, that cap was a choice we made to keep the kernel simple, not a fundamental limit. You could tile 
+       the sequence dimension and handle longer inputs, and we left that out so the kernel stays easy to read. There&#x27;s also a practical 
+       reason not to push H too far: the Hartley transform runs into numerical stability issues as the sequence gets longer.</p>
+
+<p>Everything ran on a trn1 instance in fp16/bf16. For each configuration we did 10 warmup runs, then timed 35 runs, and report the median of those, 
+       measured with neuron-bench. One note on the baseline. The library kernel is designed for trn2, but all it really does with that is a channel 
+       shard to split the work across trn2&#x27;s two neuron cores at the start. Running it on trn1 with a single core is a fair comparison. If that 
+       sounds like jargon, don&#x27;t worry about it: the baseline isn&#x27;t handicapped by the hardware we ran on.</p>
+
+<h3 id="results">Results</h3>
+<p>Here&#x27;s how the two kernels compare at H = 120 and K = 3. The table shows how many times faster the Hartley kernel is than the library kernel, 
+       for each batch size and channel count (median of 35 runs, after 10 warmups, on trn1).</p>
+
+<figure class="article-figure">
+ <img src="assets/Results.png"
+       alt="Results Graph">
+</figure>
+
+<div class="table-wrap"><table><thead><tr><th>Batch / Channels</th><th>8</th><th>32</th><th>128</th><th>256</th></tr></thead><tbody><tr><th>16</th><td>3.2x</td><td>7.9x</td><td>17.9x</td><td>16.2x</td></tr><tr><th>64</th><td>8.2x</td><td>26.5x</td><td>32.8x</td><td>111.4x</td></tr><tr><th>128</th><td>12.1x</td><td>24.0x</td><td>69.1x</td><td>70.8x</td></tr></tbody></table></div>
+
+<p>The Hartley kernel is faster in every configuration we tried, and the gap grows with the amount of work. At the smallest size it&#x27;s about 3x 
+       faster. By the time we&#x27;re past a few thousand (batch, channel) columns, it&#x27;s more than 15x faster, and in the biggest cases it&#x27;s 
+       well over 60x.</p>
+
+<p>Why the small cases look the way they do. Even the tiniest problems take our kernel around 53 µs, and that time barely moves as the problem gets 
+       bigger, up to a point. That&#x27;s a fixed cost, not real work, so it&#x27;s also why the smallest speedup is the smallest. Moving from 128 
+       columns to a few thousand costs us almost nothing extra, while the baseline&#x27;s time grows steadily. That growth is what you&#x27;d expect 
+       from the direct approach we discussed earlier: more columns means proportionally more work.</p>
+
+<p>About the biggest numbers. The 70x and 111x speedups deserve an asterisk. The library kernel&#x27;s time per column stays roughly constant at about 
+       0.7 µs for everything up to around 8,000 columns. Past that point it roughly triples, to about 2.1 µs per column, in every configuration we 
+       ran there. So part of the gap in the largest cases comes from the baseline hitting a performance cliff, and not only from the Hartley kernel 
+       being faster. We haven&#x27;t dug into what causes the jump. If you want a conservative summary, use the range below the cliff, which is roughly 
+       3x to 33x. Either way, the direction is the same.</p>
+
+<h3>One honest caveat</h3>
+<p>This kernel is not tuned. We wrote it to make the algorithm easy to follow, not to squeeze every cycle out of the chip. We didn&#x27;t spend time 
+       on instruction-level parallelism, instruction scheduling or multi-buffering, so DMA, tensor-engine and vector-engine work mostly takes turns 
+       instead of overlapping the way they would in a production kernel.</p>
+
+<p>That matters for how you read the results. Whatever speedup you see comes from the algorithmic change (turning the convolution into dense matmuls 
+       the tensor engine is good at), not from clever low-level tricks. A tuned version should do better, and we&#x27;ll look at where that headroom 
+       is near the end. By the same token, the library kernel is one public implementation of the standard approach, not a hard ceiling on what&#x27;s 
+       possible with it.</p>
+
+<p>There is a lot of interesting ideas that also come out from this work. For example, if you have a projection on the hidden dimension before or after
+       the convolution which is common in a lot of architectures. Then you can bake the DHT or IDHT into the projection weights meaning that the
+       convolution becomes even cheaper! Additionally, we effectively parallelized the reduction that occurs in the convolution which begs the question
+       can we parallelize all the other reduction in typical ML architectures to make them even more embarrassingly parallel? 
+</p>
+
+<h3>Wrapping up</h3>
+
+<p>Depthwise convolution is a thin problem: a short filter sliding along a sequence, with very little arithmetic per output, and the usual ways of 
+       running it leave the tensor engine, where nearly all of the chip's speed lives, mostly idle. The Hartley transform lets us change the shape 
+       of the problem instead of fighting it. We pay for extra arithmetic, and in return the convolution becomes dense matrix multiplies against one 
+       fixed matrix that every channel and batch element shares, with a cheap elementwise multiply in the middle. On Trainium 1, with a long sequence 
+       and a short filter, that trade came out well ahead of the library kernel, from about 3x faster on the smallest problems to well over 100x on 
+       larger ones, and that's with a kernel we didn't tune. The kernel still has plenty of headroom, from overlapping its engines to tiling longer 
+       sequences, and we'd love to see how far it goes. </p>
+
+<p>If anything resonated with you feel free to reach out. I love to chat about stuff like this. Find me at szorcic@uwaterloo.ca!</p>
+
+<div class="footer">Draft article · Figures, hardware specifications, equations, and benchmark details are still being finalized.</div>
+</article>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+
+</body>
+</html>
