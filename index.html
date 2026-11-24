@@ -93,6 +93,16 @@ pre {overflow:auto;background:var(--code);color:var(--codeText);border-radius:12
 }
 
 </style>
+
+<script>
+  MathJax = {
+    tex: {
+      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+
 </head>
 <body>
 <div class="topbar">Engineering notes · AI systems & kernels</div>
@@ -114,7 +124,11 @@ pre {overflow:auto;background:var(--code);color:var(--codeText);border-radius:12
 <p>If you've trained a vision model, you've met convolutions: a small window of weights slides across your input, 
        and at each position you multiply, add everything up, and write down one number. In one dimension, that looks like this:</p>
 
-<pre class="equation"><code>y[t] = w[0]·x[t] + w[1]·x[t+1] + ... + w[K-1]·x[t+K-1]</code></pre>
+<div class="math-display">
+$$
+y[t] = w[0]x[t] + w[1]x[t+1] + \cdots + w[K-1]x[t+K-1]
+$$
+</div>
 
 <p> <em>x</em> is your sequence, <em>w</em> is the filter (K weights), and <em>y</em> is the output. That's the whole idea. 
        The filter is a little pattern detector, and the output tells you how strongly each position matches it.</p>
@@ -229,10 +243,31 @@ pre {overflow:auto;background:var(--code);color:var(--codeText);border-radius:12
 <p>Let&#x27;s put a roofline model on this. The idea is that a kernel is held back by one of two limits, how fast the 
 engine can compute or how fast we can move the data, and the slower one sets the speed:</p>
 
-<pre class="equation"><code>time ≥ max( compute cost, memory cost )</code></pre>
+<div class="math-display">
+$$
+\text{time} \geq \max(\text{compute cost}, \text{memory cost})
+$$
+</div>
 
 <p>The compute cost comes from counting 128×128×128 tile matmuls, since that&#x27;s the unit the tensor engine works in:</p>
-<pre class="equation"><code>compute = 2 · ⌈H/128⌉ · ⌈H/128⌉ · ⌈B·(H/128)/128⌉ · C  /  (matmuls per second)</code></pre>
+
+<div class="math-display">
+$$
+\text{compute} =
+\frac{
+2 \cdot
+\left\lceil \frac{H}{128} \right\rceil
+\cdot
+\left\lceil \frac{H}{128} \right\rceil
+\cdot
+\left\lceil \frac{B \cdot (H/128)}{128} \right\rceil
+\cdot C
+}{
+\text{matmuls per second}
+}
+$$
+</div>
+
 <p>The first two ceilings count how many 128×128 tiles the Toeplitz matrix is cut into, the third counts how many 128-column chunks of the folded 
        input stream through it, and the factor of C is there because every channel needs its own matrix. This assumes the copies from PSUM back
        to SBUF never become a bottleneck, which is generous, so treat it as a best case. Notice how much of that work is wasted: each row of 
@@ -241,9 +276,19 @@ engine can compute or how fast we can move the data, and the slower one sets the
 <p>The memory cost is the time to get data on and off the chip. Assuming a dataype of fp16 which is 2 bytes and N be the length of the 
        output, given by N = H + K - 1:</p>
 
-<pre class="equation"><code>memory = 2 · B · C · H / DMA bandwidth     (input in)
-       + 2 · C · K / DMA bandwidth         (the filters in)
-       + 2 · B · C · N / DMA bandwidth     (result out)</code></pre>
+<div class="math-display">
+$$
+\begin{aligned}
+\text{memory} = {} &
+\frac{2BCH}{\text{DMA bandwidth}}
+&& \text{(input in)} \\[6pt]
+&+ \frac{2CK}{\text{DMA bandwidth}}
+&& \text{(filters in)} \\[6pt]
+&+ \frac{2BCN}{\text{DMA bandwidth}}
+&& \text{(result out)}
+\end{aligned}
+$$
+</div>
 
 <p>The NKI library&#x27;s version. The kernel we compare against later is a cousin of this idea, called implicit GEMM. It avoids building 
        the big mostly-zero matrix by loading the input in a shifted layout, so the filter taps line up along the matmul&#x27;s contraction axis. 
@@ -265,11 +310,27 @@ engine can compute or how fast we can move the data, and the slower one sets the
 <p>There&#x27;s no wasted arithmetic here. Each (batch, channel) pair has H outputs and each needs K multiply-adds, and the vector engine 
        handles 128 elements at a time, so the roofline looks like this:</p>
 
-<pre class="equation"><code>compute = B · C · K · H / 128  /  (vector-engine operations per second)</code></pre>
+<div class="math-display">
+$$
+\text{compute} =
+\frac{B \cdot C \cdot K \cdot H}
+{128 \cdot \text{vector-engine operations per second}}
+$$
+</div>
 
-<pre class="equation"><code>memory = 2 · B · C · H / DMA bandwidth     (input in)
-       + 2 · C · K / DMA bandwidth         (the filters in)
-       + 2 · B · C · N / DMA bandwidth     (result out)</code></pre>
+<div class="math-display">
+$$
+\begin{aligned}
+\text{memory} = {} &
+\frac{2BCH}{\text{DMA bandwidth}}
+&& \text{(input in)} \\[6pt]
+&+ \frac{2CK}{\text{DMA bandwidth}}
+&& \text{(filters in)} \\[6pt]
+&+ \frac{2BCN}{\text{DMA bandwidth}}
+&& \text{(result out)}
+\end{aligned}
+$$
+</div>
 
 <p>The memory cost is identical to the Toeplitz approach, since the same data has to come in and go out. The difference is the compute side. 
        The vector engine is a lot slower than the tensor engine, and the cost grows in direct proportion to K, so a longer filter means 
@@ -321,7 +382,16 @@ engine can compute or how fast we can move the data, and the slower one sets the
 <p>The Hartley transform is a close cousin of the Fourier transform that stays entirely in the real numbers. Instead of complex exponentials, 
        it uses a real wave, cosine plus sine:</p>
 
-<pre class="equation"><code>H[k] = Σₙ x[n] · cas(2π·n·k / N)        where cas(θ) = cos(θ) + sin(θ)</code></pre>
+<div class="math-display">
+$$
+H[k] = \sum_{n} x[n] \cdot \operatorname{cas}\left(\frac{2\pi nk}{N}\right)
+$$
+
+$$
+\text{where} \quad
+\operatorname{cas}(\theta) = \cos(\theta) + \sin(\theta)
+$$
+</div>
 
 <p>It&#x27;s real in, real out, so there are no imaginary parts and no complex arithmetic, and everything stays in fp16. And it&#x27;s its own 
        inverse, up to a scale: apply the transform twice and you get your original sequence back multiplied by N, so the inverse uses the same 
@@ -368,21 +438,35 @@ the tensor engine is built to do at full speed, so the bet is that doing more wo
 <p>There&#x27;s one twist. In the Fourier world, the convolution theorem is a clean pointwise product. In the Hartley world it&#x27;s a 
 little messier, because a single Hartley coefficient mixes information from a frequency and its mirror image. Writing X[−k] for the coefficient 
 at the mirrored index (which wraps around to N − k), the transform Z of the convolution reads:</p>
+<!-- 
+<pre class="equation"><code>Z[k] = ½ · ( X[k]·Y[k] + X[−k]·Y[k] + X[k]·Y[−k] − X[−k]·Y[−k] )</code></pre> -->
 
-<pre class="equation"><code>Z[k] = ½ · ( X[k]·Y[k] + X[−k]·Y[k] + X[k]·Y[−k] − X[−k]·Y[−k] )</code></pre>
+<div class="math-display">
+$$
+Z[k] = \frac{1}{2}\left(
+X[k]Y[k] + X[-k]Y[k] + X[k]Y[-k] - X[-k]Y[-k]
+\right)
+$$
+</div>
+
 <p>where X is the transform of the input and Y is the transform of the filter. It looks like a mouthful, but all it needs is the transformed 
 input and a mirrored copy of it, combined with pointwise multiplies and adds. There&#x27;s still no sliding window.</p>
 
 <p>A little algebra makes it friendlier. Split the filter&#x27;s transform into its even and odd parts, Y_even = (Y[k] + Y[−k]) / 2 and 
 Y_odd = (Y[k] − Y[−k]) / 2. Then the whole thing collapses to:</p>
 
-<pre class="equation"><code>Z[k] = X[k] · Y_even[k]  +  X[−k] · Y_odd[k]</code></pre>
+<div class="math-display">
+$$
+Z[k] = X[k]Y_{\text{even}}[k] + X[-k]Y_{\text{odd}}[k]
+$$
+</div>
+
 <p>Two pointwise multiplies and an add. And since the filter is fixed, Y_even and Y_odd can be worked out ahead of time.</p>
 <p>Put the pieces together and a depthwise convolution becomes three steps:</p>
-<p>1.	Forward transform. Multiply the padded input by the DHT matrix, and by a mirrored version of it to get X[−k]. These are dense 
+<p><b>1.	Forward transform. </b> Multiply the padded input by the DHT matrix, and by a mirrored version of it to get X[−k]. These are dense 
        matrix multiplies on the tensor engine.</p>
-<p>2.	Pointwise combine. Multiply by each channel&#x27;s filter spectra and add. This is elementwise work on the vector engine.</p>
-<p>3.	Inverse transform. One more dense matrix multiply with the same DHT matrix, back on the tensor engine.</p>
+<p><b>2.	Pointwise combine.</b> Multiply by each channel&#x27;s filter spectra and add. This is elementwise work on the vector engine.</p>
+<p><b>3.	Inverse transform.</b> One more dense matrix multiply with the same DHT matrix, back on the tensor engine.</p>
 
 <!-- <div class="figure-placeholder"><span class="figure-label">FIGURE</span><p>Figure idea: the three steps drawn as a pipeline, colored by which engine does the work: tensor, vector, tensor.</p></div> -->
 
@@ -451,15 +535,64 @@ nisa.tensor_tensor(conv, t0,   t1,  op=nl.add)</code></pre>
 
 <h3>How fast could it go?</h3>
 <p>Same recipe as before: the kernel is limited by the slower of compute and memory.</p>
-<pre class="equation"><code>time ≥ max( tensor-engine compute, vector-engine compute, memory )</code></pre>
+
+<div class="math-display">
+$$
+\text{time} \geq \max\left(
+\text{tensor-engine compute},
+\text{vector-engine compute},
+\text{memory}
+\right)
+$$
+</div>
+
 <p>The tensor engine does three dense matmuls per column of data, two forward and one inverse, each of them against an N×N matrix:</p>
-<pre class="equation"><code>tensor = 3 · ⌈N/128⌉ · ⌈N/128⌉ · ⌈B·C/128⌉  /  (matmuls per second)</code></pre>
+
+<div class="math-display">
+$$
+\text{tensor} =
+\frac{
+3 \cdot
+\left\lceil \frac{N}{128} \right\rceil
+\cdot
+\left\lceil \frac{N}{128} \right\rceil
+\cdot
+\left\lceil \frac{BC}{128} \right\rceil
+}{
+\text{matmuls per second}
+}
+$$
+</div>
+
 <p>The vector engine does the three pointwise operations over N rows by B·C columns:</p>
-<pre class="equation"><code>vector = 3 · ⌈N/128⌉ · B·C  /  (vector-engine operations per second)</code></pre>
+
+<div class="math-display">
+$$
+\text{vector} =
+\frac{
+3 \cdot \left\lceil \frac{N}{128} \right\rceil \cdot B \cdot C
+}{
+\text{vector-engine operations per second}
+}
+$$
+</div>
+
 <p>And the memory cost is the data going in and out, plus a small one-time load of the matrices and the weights:</p>
-<pre class="equation"><code>memory = datatype · B · C · H / DMA bandwidth                  (input in)
-       + datatype · B · C · N / DMA bandwidth                  (result out)
-       + datatype · (2·N² + 2·N·C) / DMA bandwidth             (matrices and weights, loaded once)</code></pre>
+
+<div class="math-display">
+$$
+\begin{aligned}
+\text{memory} = {} &
+\frac{\text{datatype} \cdot BCH}{\text{DMA bandwidth}}
+&& \text{(input in)} \\[6pt]
+&+ \frac{\text{datatype} \cdot BCN}{\text{DMA bandwidth}}
+&& \text{(result out)} \\[6pt]
+&+ \frac{\text{datatype} \cdot (2N^2 + 2NC)}{\text{DMA bandwidth}}
+&& \text{(matrices and weights, loaded once)}
+\end{aligned}
+$$
+</div>
+
 <p>Compare this with the Toeplitz approach. The compute no longer has a factor of C, because the matrices are shared by every channel, and no 
        K appears anywhere, because the filter only enters through the weights. It does have more tensor-engine work than a single Toeplitz pass, 
        three matmuls where there was one, and it adds a vector-engine term that the Toeplitz approach didn&#x27;t have. The bet is that those 
