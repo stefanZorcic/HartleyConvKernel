@@ -101,7 +101,14 @@ pre {overflow:auto;background:var(--code);color:var(--codeText);border-radius:12
 <a href="#s1">Depthwise convolution</a><a href="#s2">Trainium 1</a><a href="#s3">Why every percent matters</a><a href="#s4">Conventional approaches</a><a href="#s5">Signal-processing detour</a><a href="#s6">The kernel</a><a href="#results">Results & caveats</a></nav>
 
 <article>
-<header class="hero"><div class="eyebrow">Kernel optimization · Trainium 1</div><h1>Efficient Small Channel Depthwise Convolutions</h1><p class="dek">A Hartley-transform approach to 1D depthwise convolution—Lets build a 1D Depthwise Convolution Kernel 100x Faster Than Amazon's Public One!</p><div class="meta"><span class="pill">NKI</span><span class="pill">Trainium</span><span class="pill">Performance</span><span>Draft · Technical deep dive</span></div></header>
+<header class="hero"><div class="eyebrow">Kernel optimization · Trainium 1</div><h1>Efficient Small Channel Depthwise Convolutions</h1>
+       <p class="dek">A Hartley-transform approach to 1D depthwise convolution—Lets build a 1D Depthwise Convolution Kernel 100x Faster Than Amazon's Public One!</p>
+       <p> TL;DR: By converting the inputs into a the frequency domain with a single matrix multiplication (matmul), we can perform the 
+              convolution as a single element wise operation without a reduction to efficiently map the operation to Trainium hardware acheiving up to 100x faster performance
+              against the current state of the art.
+
+       </p>
+       <div class="meta"><span class="pill">NKI</span><span class="pill">Trainium</span><span class="pill">Performance</span><span>Draft · Technical deep dive</span></div></header>
 
 <h2 id="s1">What is a depthwise convolution, anyway?</h2>
 <p>If you've trained a vision model, you've met convolutions: a small window of weights slides across your input, 
@@ -240,8 +247,7 @@ engine can compute or how fast we can move the data, and the slower one sets the
 
 <p>The NKI library&#x27;s version. The kernel we compare against later is a cousin of this idea, called implicit GEMM. It avoids building 
        the big mostly-zero matrix by loading the input in a shifted layout, so the filter taps line up along the matmul&#x27;s contraction axis. 
-       It&#x27;s a smarter way to use the tensor engine, but it&#x27;s still a depthwise convolution at heart, with a very thin matmul. 
-       [Verify this description against depthwise_conv1d.py before publishing.]</p>
+       It&#x27;s a smarter way to use the tensor engine, but it&#x27;s still a depthwise convolution at heart, with a very thin matmul. </p>
 
 <h3>Approach 2: let the vector engine do it</h3>
 <p>The other direct approach follows the formula literally and skips the tensor engine entirely. Put the (batch, channel) pairs across the
@@ -269,7 +275,7 @@ engine can compute or how fast we can move the data, and the slower one sets the
        The vector engine is a lot slower than the tensor engine, and the cost grows in direct proportion to K, so a longer filter means 
        proportionally more work. All the while, the tensor engine, where nearly all of the chip&#x27;s peak throughput lives, sits idle.</p>
 
-<h3>The common thread</h3>
+<h3>Missing out on compute</h3>
 <p>Each approach either avoids the fast engine or uses only a sliver of it. The Toeplitz approach runs on the tensor engine but spends most 
        of its arithmetic on zeros, and needs a different matrix for every channel. The vector approach does exactly the arithmetic required 
        but on the slowest engine. A depthwise convolution is just a thin problem: a short filter sliding along a sequence, with very little 
@@ -617,7 +623,7 @@ def hartley_kernel(x, htm, htm_reversed, w_a, w_d):
 </details>
 
 <h3>How we tested it</h3>
-<p>Before we get to the numbers, a quick word on what we measured, since a few of these choices change how you should read the results.</p>
+
 <p>On one side is depthwise_conv1d_implicit_gemm, the depthwise convolution kernel that ships in the NKI library. On the other is our Hartley kernel. 
        Both do the same job: a depthwise 1D convolution with stride 1 and zero padding.</p>
 
@@ -644,36 +650,22 @@ def hartley_kernel(x, htm, htm_reversed, w_a, w_d):
 
 <p>The Hartley kernel is faster in every configuration we tried, and the gap grows with the amount of work. At the smallest size it&#x27;s about 3x 
        faster. By the time we&#x27;re past a few thousand (batch, channel) columns, it&#x27;s more than 15x faster, and in the biggest cases it&#x27;s 
-       well over 60x.</p>
+       well over 100x.</p>
 
-<p>Why the small cases look the way they do. Even the tiniest problems take our kernel around 53 µs, and that time barely moves as the problem gets 
-       bigger, up to a point. That&#x27;s a fixed cost, not real work, so it&#x27;s also why the smallest speedup is the smallest. Moving from 128 
-       columns to a few thousand costs us almost nothing extra, while the baseline&#x27;s time grows steadily. That growth is what you&#x27;d expect 
-       from the direct approach we discussed earlier: more columns means proportionally more work.</p>
+<p>Moving from 128 columns to a few thousand costs us almost nothing extra, while the baseline&#x27;s time grows steadily. That growth is what you&#x27;d expect 
+       from the direct approach we discussed earlier: more columns means proportionally more work. Additionally, the cost of the kernel roughly is symmetric with
+respect to B and C growth as we would expect from our roofline analysis. </p>
 
-<p>About the biggest numbers. The 70x and 111x speedups deserve an asterisk. The library kernel&#x27;s time per column stays roughly constant at about 
-       0.7 µs for everything up to around 8,000 columns. Past that point it roughly triples, to about 2.1 µs per column, in every configuration we 
-       ran there. So part of the gap in the largest cases comes from the baseline hitting a performance cliff, and not only from the Hartley kernel 
-       being faster. We haven&#x27;t dug into what causes the jump. If you want a conservative summary, use the range below the cliff, which is roughly 
-       3x to 33x. Either way, the direction is the same.</p>
 
-<h3>One honest caveat</h3>
-<p>This kernel is not tuned. We wrote it to make the algorithm easy to follow, not to squeeze every cycle out of the chip. We didn&#x27;t spend time 
-       on instruction-level parallelism, instruction scheduling or multi-buffering, so DMA, tensor-engine and vector-engine work mostly takes turns 
-       instead of overlapping the way they would in a production kernel.</p>
 
-<p>That matters for how you read the results. Whatever speedup you see comes from the algorithmic change (turning the convolution into dense matmuls 
-       the tensor engine is good at), not from clever low-level tricks. A tuned version should do better, and we&#x27;ll look at where that headroom 
-       is near the end. By the same token, the library kernel is one public implementation of the standard approach, not a hard ceiling on what&#x27;s 
-       possible with it.</p>
 
-<p>There is a lot of interesting ideas that also come out from this work. For example, if you have a projection on the hidden dimension before or after
+<h3>Wrapping up</h3>
+
+<p>There are a lot of interesting ideas that also come out from this work. For example, if you have a projection on the hidden dimension before or after
        the convolution which is common in a lot of architectures. Then you can bake the DHT or IDHT into the projection weights meaning that the
        convolution becomes even cheaper! Additionally, we effectively parallelized the reduction that occurs in the convolution which begs the question
        can we parallelize all the other reduction in typical ML architectures to make them even more embarrassingly parallel? 
 </p>
-
-<h3>Wrapping up</h3>
 
 <p>Depthwise convolution is a thin problem: a short filter sliding along a sequence, with very little arithmetic per output, and the usual ways of 
        running it leave the tensor engine, where nearly all of the chip's speed lives, mostly idle. The Hartley transform lets us change the shape 
@@ -685,7 +677,8 @@ def hartley_kernel(x, htm, htm_reversed, w_a, w_d):
 
 <p>If anything resonated with you feel free to reach out. I love to chat about stuff like this. Find me at szorcic@uwaterloo.ca!</p>
 
-<div class="footer">Draft article · Figures, hardware specifications, equations, and benchmark details are still being finalized.</div>
+
+<div class="footer">Thank you to Sophia Yang and Jeremy Liang for providing invaluable feedback on the drafts!</div>
 </article>
 </div>
 
@@ -695,3 +688,9 @@ def hartley_kernel(x, htm, htm_reversed, w_a, w_d):
 
 </body>
 </html>
+
+<!-- 
+Add a Tl;DR
+
+
+-->
